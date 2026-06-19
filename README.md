@@ -1,6 +1,11 @@
 # ☁️ AWS Three-Tier Architecture
 
-A production-grade **three-tier architecture** deployed on AWS, following the AWS Well-Architected Framework. Built to demonstrate real-world cloud infrastructure design with high availability, security, and scalability.
+[![Terraform](https://img.shields.io/badge/IaC-Terraform-7B42BC?logo=terraform&logoColor=white)](https://www.terraform.io/)
+[![AWS](https://img.shields.io/badge/Cloud-AWS-232F3E?logo=amazon-aws&logoColor=white)](https://aws.amazon.com/)
+[![Region](https://img.shields.io/badge/Region-ap--south--1-orange)](https://aws.amazon.com/about-aws/global-infrastructure/regions_az/)
+[![Well-Architected](https://img.shields.io/badge/AWS-Well--Architected-FF9900?logo=amazon-aws&logoColor=white)](https://aws.amazon.com/architecture/well-architected/)
+
+A **production-grade three-tier architecture** deployed on AWS following the AWS Well-Architected Framework. Demonstrates real-world cloud infrastructure design with high availability, security hardening, and full Infrastructure as Code using Terraform.
 
 ---
 
@@ -15,30 +20,30 @@ A production-grade **three-tier architecture** deployed on AWS, following the AW
                     └──────┬──────┘
                            │
               ┌────────────▼────────────┐
-              │    Application Load     │
-              │    Balancer (ALB)        │
+              │   Application Load      │
+              │   Balancer (ALB)        │
               └────────┬────────────────┘
                        │
-        ┌──────────────┼──────────────┐
-        │              │              │
-   AZ-1 (ap-south-1a)           AZ-2 (ap-south-1b)
+        ┌──────────────┴──────────────┐
         │                             │
-┌───────▼───────┐           ┌─────────▼──────┐
-│  Public Subnet│           │  Public Subnet  │
-│  (Web Tier)   │           │  (Web Tier)     │
-│  EC2 Instance │           │  EC2 Instance   │
-└───────┬───────┘           └────────┬────────┘
-        │                            │
-┌───────▼───────┐           ┌────────▼────────┐
-│ Private Subnet│           │  Private Subnet  │
-│ (App Tier)    │           │  (App Tier)      │
-│ EC2 Instance  │           │  EC2 Instance    │
+  AZ: ap-south-1a              AZ: ap-south-1b
+        │                             │
+┌───────▼───────┐           ┌─────────▼───────┐
+│ Public Subnet │           │  Public Subnet   │
+│  (Web Tier)   │           │   (Web Tier)     │
+│  EC2 Instance │           │  EC2 Instance    │
 └───────┬───────┘           └────────┬─────────┘
         │                            │
-┌───────▼────────────────────────────▼─────────┐
-│              Private Subnet (Data Tier)        │
-│                  RDS / Database               │
-└───────────────────────────────────────────────┘
+┌───────▼───────┐           ┌────────▼─────────┐
+│Private Subnet │           │  Private Subnet   │
+│  (App Tier)   │           │   (App Tier)      │
+│ EC2 Instance  │           │  EC2 Instance     │
+└───────┬───────┘           └────────┬──────────┘
+        │                            │
+┌───────▼────────────────────────────▼──────────┐
+│             Private Subnet (Data Tier)          │
+│               RDS MySQL (Multi-AZ)              │
+└────────────────────────────────────────────────┘
 ```
 
 ---
@@ -47,131 +52,114 @@ A production-grade **three-tier architecture** deployed on AWS, following the AW
 
 | Service | Purpose |
 |---|---|
-| **VPC** | Isolated network with custom CIDR block |
-| **Subnets** | Public (web) + Private (app + data) per AZ |
+| **VPC** | Isolated network with custom CIDR `10.0.0.0/16` |
+| **Subnets** | Public (web) + Private (app + data) across 2 AZs |
 | **Internet Gateway** | Enables internet access for public subnets |
+| **NAT Gateway** | Outbound internet for private subnets |
 | **Route Tables** | Controls traffic flow between subnets |
-| **Application Load Balancer (ALB)** | Distributes traffic across EC2 instances |
+| **Application Load Balancer** | Distributes traffic across EC2 web tier |
 | **EC2** | Web and application tier compute |
+| **RDS** | Managed relational database in data tier |
 | **Security Groups** | Stateful firewall rules per tier |
 | **IAM Roles** | Least-privilege access for EC2 instances |
-| **NAT Gateway** | Outbound internet for private subnets |
 
 ---
 
-## 🔐 Security Design
-
-### Security Group Rules
-
-**ALB Security Group**
-- Inbound: HTTP (80) + HTTPS (443) from `0.0.0.0/0`
-- Outbound: To Web Tier SG only
-
-**Web Tier (EC2)**
-- Inbound: HTTP from ALB SG only
-- Outbound: To App Tier SG only
-
-**App Tier (EC2)**
-- Inbound: From Web Tier SG only
-- Outbound: To Data Tier SG only
-
-**Data Tier**
-- Inbound: From App Tier SG only
-- No direct internet access
-
-### IAM
-- EC2 instances use instance profiles (no hardcoded credentials)
-- Least-privilege policies scoped to required services only
-
----
-
-## 🌐 VPC Configuration
+## 🌐 Network Configuration
 
 ```
 VPC CIDR: 10.0.0.0/16
 
 Public Subnets (Web Tier):
-  AZ-1: 10.0.1.0/24
-  AZ-2: 10.0.2.0/24
+  ap-south-1a → 10.0.1.0/24
+  ap-south-1b → 10.0.2.0/24
 
 Private Subnets (App Tier):
-  AZ-1: 10.0.3.0/24
-  AZ-2: 10.0.4.0/24
+  ap-south-1a → 10.0.3.0/24
+  ap-south-1b → 10.0.4.0/24
 
 Private Subnets (Data Tier):
-  AZ-1: 10.0.5.0/24
-  AZ-2: 10.0.6.0/24
+  ap-south-1a → 10.0.5.0/24
+  ap-south-1b → 10.0.6.0/24
+```
+
+---
+
+## 🔐 Security Design
+
+**Traffic flow (strictly enforced via Security Groups):**
+
+```
+Internet → ALB SG → Web Tier SG → App Tier SG → Data Tier SG
+```
+
+- ALB: accepts HTTP/HTTPS from `0.0.0.0/0` only
+- Web EC2: accepts traffic from ALB SG only
+- App EC2: accepts traffic from Web SG only
+- RDS: accepts traffic from App SG only — no direct internet access
+- EC2 instances use **IAM instance profiles** — zero hardcoded credentials
+
+---
+
+## 🚀 Deployment with Terraform
+
+### Prerequisites
+- AWS CLI configured (`aws configure`)
+- Terraform >= 1.0 installed
+
+### Deploy
+```bash
+git clone https://github.com/manojkumar-021/aws-three-tier-architecture.git
+cd aws-three-tier-architecture/terraform
+
+terraform init
+terraform plan
+terraform apply
+```
+
+### Destroy (to avoid AWS charges)
+```bash
+terraform destroy
 ```
 
 ---
 
 ## ✅ High Availability Design
 
-- Resources deployed across **2 Availability Zones** (ap-south-1a, ap-south-1b)
-- ALB automatically routes traffic to healthy instances
-- If one AZ goes down, traffic shifts to the other AZ with zero manual intervention
+- Resources span **2 Availability Zones** (ap-south-1a, ap-south-1b)
+- ALB automatically routes to healthy instances via health checks
+- AZ failure → traffic shifts automatically with zero manual intervention
 - Each tier is independently scalable
 
 ---
 
-## 🚀 Deployment Steps
-
-### 1. Create VPC and Networking
-```bash
-# Create VPC
-aws ec2 create-vpc --cidr-block 10.0.0.0/16
-
-# Create subnets, IGW, NAT Gateway, Route Tables
-# (refer to deployment scripts in /scripts folder)
-```
-
-### 2. Configure Security Groups
-```bash
-# Create SGs for each tier
-aws ec2 create-security-group --group-name alb-sg --description "ALB Security Group" --vpc-id <vpc-id>
-aws ec2 create-security-group --group-name web-sg --description "Web Tier SG" --vpc-id <vpc-id>
-aws ec2 create-security-group --group-name app-sg --description "App Tier SG" --vpc-id <vpc-id>
-```
-
-### 3. Launch EC2 Instances
-- Launch web tier instances in **public subnets**
-- Launch app tier instances in **private subnets**
-- Attach appropriate IAM roles and security groups
-
-### 4. Set Up ALB
-- Create target group pointing to web tier EC2s
-- Configure listener rules (HTTP → target group)
-- Enable health checks
-
----
-
-## 📐 AWS Well-Architected Pillars Applied
+## 📐 AWS Well-Architected Pillars
 
 | Pillar | Implementation |
 |---|---|
-| **Operational Excellence** | Infrastructure documented, repeatable setup |
-| **Security** | Tiered security groups, IAM roles, private subnets |
+| **Operational Excellence** | Full IaC with Terraform, repeatable deployments |
+| **Security** | Tiered SGs, IAM roles, private subnets, no public DB access |
 | **Reliability** | Multi-AZ deployment, ALB health checks |
-| **Performance Efficiency** | Right-sized EC2 instances per tier |
+| **Performance Efficiency** | Right-sized EC2 per tier |
 | **Cost Optimization** | NAT Gateway shared across AZs |
 
 ---
 
 ## 🔭 Upcoming Enhancements
 
-- [ ] Add Terraform scripts for full IaC provisioning
-- [ ] Integrate Auto Scaling Groups for web and app tiers
-- [ ] Add CloudWatch alarms and dashboards
-- [ ] Enable AWS WAF on ALB for web application firewall
+- [ ] Auto Scaling Groups for web and app tiers
+- [ ] CloudWatch alarms and dashboards
+- [ ] AWS WAF on ALB
+- [ ] Remote Terraform state with S3 + DynamoDB locking
 
 ---
 
-## 🔑 Key Learnings
+## 💡 Key Learnings
 
-- Designing network isolation using VPC, subnets, and route tables
+- Designing multi-tier network isolation with VPC, subnets, and route tables
 - Implementing least-privilege security with Security Groups and IAM
-- Building high availability with multi-AZ deployments
-- Understanding traffic flow through ALB → Web → App → Data tiers
+- Building high availability with multi-AZ and load balancing
+- Provisioning infrastructure end-to-end with Terraform
 
 ---
 
